@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import { phoneLoginSchema, otpSchema } from "@/lib/validations";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
@@ -11,6 +12,8 @@ import type { Country } from "@/types";
 
 export default function PhoneLoginForm() {
   const router = useRouter();
+  const supabase = createClient();
+
   const [step, setStep] = useState<"phone" | "otp">("phone");
   const [countries, setCountries] = useState<Country[]>([]);
   const [selectedCountry, setSelectedCountry] = useState<Country | null>(null);
@@ -27,7 +30,6 @@ export default function PhoneLoginForm() {
   } | null>(null);
   const [otpTimer, setOtpTimer] = useState(0);
 
-  // Fetch active countries from API
   useEffect(() => {
     async function fetchCountries() {
       try {
@@ -35,10 +37,7 @@ export default function PhoneLoginForm() {
         const data = await res.json();
         if (data.success && data.data) {
           setCountries(data.data);
-          // Default to first country (Saudi Arabia +966)
-          if (data.data.length > 0) {
-            setSelectedCountry(data.data[0]);
-          }
+          if (data.data.length > 0) setSelectedCountry(data.data[0]);
         }
       } catch (err) {
         console.error("Failed to fetch countries:", err);
@@ -47,7 +46,6 @@ export default function PhoneLoginForm() {
     fetchCountries();
   }, []);
 
-  // OTP countdown timer
   useEffect(() => {
     if (otpTimer > 0) {
       const timer = setTimeout(() => setOtpTimer(otpTimer - 1), 1000);
@@ -57,7 +55,6 @@ export default function PhoneLoginForm() {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    // Phone number: only allow digits
     if (name === "phone_number") {
       const digitsOnly = value.replace(/\D/g, "");
       setFormData({ ...formData, [name]: digitsOnly });
@@ -87,7 +84,6 @@ export default function PhoneLoginForm() {
       return;
     }
 
-    // Validate phone & full name
     const schema = phoneLoginSchema(selectedCountry.phone_validation_length);
     const result = schema.safeParse({
       phone_number: formData.phone_number,
@@ -104,22 +100,23 @@ export default function PhoneLoginForm() {
       return;
     }
 
+    const fullPhone = `${selectedCountry.country_code}${formData.phone_number}`;
+
     setLoading(true);
     try {
-      const res = await fetch("/api/auth/phone/send-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          phone_number: formData.phone_number,
-          country_code: selectedCountry.country_code,
-          full_name: formData.full_name,
-        }),
+      // Use Supabase's built-in phone OTP (SMS)
+      const { data, error } = await supabase.auth.signInWithOtp({
+        phone: fullPhone,
+        options: {
+          data: {
+            full_name: formData.full_name,
+            auth_provider: "phone",
+          },
+        },
       });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        setAlert({ type: "error", message: data.error || "Failed to send OTP" });
+      if (error) {
+        setAlert({ type: "error", message: error.message });
         return;
       }
 
@@ -127,10 +124,13 @@ export default function PhoneLoginForm() {
       setOtpTimer(60);
       setAlert({
         type: "success",
-        message: `OTP sent to ${selectedCountry.country_code}${formData.phone_number}`,
+        message: `OTP sent to ${fullPhone}`,
       });
     } catch (err) {
-      setAlert({ type: "error", message: "Failed to send OTP. Please try again." });
+      setAlert({
+        type: "error",
+        message: "Failed to send OTP. Please try again.",
+      });
     } finally {
       setLoading(false);
     }
@@ -146,30 +146,48 @@ export default function PhoneLoginForm() {
       return;
     }
 
+    const fullPhone = `${selectedCountry?.country_code}${formData.phone_number}`;
+
     setLoading(true);
     try {
-      const res = await fetch("/api/auth/phone/verify-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          phone_number: formData.phone_number,
-          country_code: selectedCountry?.country_code,
-          otp: formData.otp,
-          full_name: formData.full_name,
-        }),
+      // Verify OTP with Supabase — this creates a session automatically
+      const {
+        data: { session },
+        error,
+      } = await supabase.auth.verifyOtp({
+        phone: fullPhone,
+        token: formData.otp,
+        type: "sms",
       });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        setAlert({ type: "error", message: data.error || "Invalid OTP" });
+      if (error) {
+        setAlert({ type: "error", message: error.message });
         return;
       }
 
-      router.push("/");
-      router.refresh();
+      if (session) {
+        // Ensure profile exists
+        try {
+          await fetch("/api/auth/phone/complete-profile", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              full_name: formData.full_name,
+              phone_number: fullPhone,
+            }),
+          });
+        } catch (profileErr) {
+          console.error("Profile creation error:", profileErr);
+        }
+
+        router.push("/");
+        router.refresh();
+      }
     } catch (err) {
-      setAlert({ type: "error", message: "Verification failed. Please try again." });
+      setAlert({
+        type: "error",
+        message: "Verification failed. Please try again.",
+      });
     } finally {
       setLoading(false);
     }
@@ -185,7 +203,6 @@ export default function PhoneLoginForm() {
             onClose={() => setAlert(null)}
           />
         )}
-
         <div className="text-center mb-4">
           <p className="text-sm text-surface-600">
             Enter the 6-digit code sent to
@@ -195,7 +212,6 @@ export default function PhoneLoginForm() {
             {formData.phone_number}
           </p>
         </div>
-
         <Input
           label="Verification Code"
           name="otp"
@@ -207,11 +223,9 @@ export default function PhoneLoginForm() {
           className="text-center text-2xl tracking-[0.5em] font-mono"
           required
         />
-
         <Button type="submit" fullWidth loading={loading}>
           Verify OTP
         </Button>
-
         <div className="text-center">
           <button
             type="button"
@@ -227,7 +241,6 @@ export default function PhoneLoginForm() {
             {otpTimer > 0 ? `Resend OTP in ${otpTimer}s` : "Resend OTP"}
           </button>
         </div>
-
         <button
           type="button"
           onClick={() => {
@@ -252,7 +265,6 @@ export default function PhoneLoginForm() {
           onClose={() => setAlert(null)}
         />
       )}
-
       <Input
         label="Full Name"
         name="full_name"
@@ -262,7 +274,6 @@ export default function PhoneLoginForm() {
         error={errors.full_name}
         required
       />
-
       {countries.length > 0 && (
         <Select
           label="Country"
@@ -275,7 +286,6 @@ export default function PhoneLoginForm() {
           required
         />
       )}
-
       <Input
         label="Phone Number"
         name="phone_number"
@@ -300,7 +310,6 @@ export default function PhoneLoginForm() {
         }
         required
       />
-
       <Button type="submit" fullWidth loading={loading}>
         Send OTP
       </Button>

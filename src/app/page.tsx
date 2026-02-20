@@ -7,6 +7,16 @@ export default async function HomePage() {
     data: { user },
   } = await supabase.auth.getUser();
 
+  let isAdmin = false;
+  if (user) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("is_admin")
+      .eq("id", user.id)
+      .single();
+    isAdmin = !!profile?.is_admin;
+  }
+
   return (
     <div className="min-h-screen bg-surface-50">
       <header className="bg-white border-b border-surface-200">
@@ -23,12 +33,14 @@ export default async function HomePage() {
                 >
                   Account Settings
                 </Link>
-                <Link
-                  href="/admin/users"
-                  className="text-sm text-surface-600 hover:text-surface-900 transition-colors"
-                >
-                  Admin
-                </Link>
+                {isAdmin && (
+                  <Link
+                    href="/admin/users"
+                    className="text-sm text-surface-600 hover:text-surface-900 transition-colors"
+                  >
+                    Admin
+                  </Link>
+                )}
                 <form action="/api/auth/signout" method="POST">
                   <button
                     type="submit"

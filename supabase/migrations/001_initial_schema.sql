@@ -200,7 +200,7 @@ BEGIN
     NEW.id,
     NEW.email,
     COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.raw_user_meta_data->>'name', ''),
-    COALESCE((NEW.raw_user_meta_data->>'auth_provider')::auth_provider_type, 'email'),
+    COALESCE((NEW.raw_user_meta_data->>'auth_provider')::public.auth_provider_type, 'email'::public.auth_provider_type),
     CASE
       WHEN NEW.email_confirmed_at IS NOT NULL THEN true
       ELSE false
@@ -213,9 +213,9 @@ BEGIN
 
   RETURN NEW;
 END;
-$$ language plpgsql security definer;
+$$ language plpgsql security definer SET search_path = public;
 
 -- Note: Uncomment the trigger below if you want automatic profile creation
--- CREATE TRIGGER on_auth_user_created
---   AFTER INSERT ON auth.users
---   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();

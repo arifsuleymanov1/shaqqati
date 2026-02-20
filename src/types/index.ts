@@ -21,6 +21,7 @@ export interface UserProfile {
   national_short_address: string | null;
   address: string | null;
   is_agent: boolean;
+  is_admin: boolean;
   is_email_verified: boolean;
   auth_provider: AuthProvider;
   created_at: string;

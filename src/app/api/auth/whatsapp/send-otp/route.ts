@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
     const otp = generateOTP();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
-    // Store OTP
+    // Store OTP in database
     const { error: otpError } = await supabase.from("otp_codes").upsert(
       {
         phone_number: fullPhone,
@@ -63,15 +63,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Send OTP via WhatsApp
+    // Send OTP via Twilio WhatsApp
     const waResult = await sendWhatsAppOTP(phone_number, country_code, otp);
 
     if (!waResult.success) {
+      console.error("WhatsApp send failed:", waResult.error);
       return NextResponse.json(
         { error: "Failed to send WhatsApp OTP. Please try again." },
         { status: 500 }
       );
     }
+
+    console.log(`WhatsApp OTP sent to ${fullPhone}, message_id: ${waResult.message_id}`);
 
     return NextResponse.json({
       success: true,
